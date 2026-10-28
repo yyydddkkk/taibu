@@ -48,6 +48,25 @@ export function createGateway(origin) {
     response.on('close', () => { clearTimeout(deadline); upstream.destroy(); });
     request.pipe(upstream);
   });
+  // 本地开发：Next dev 的热更新（HMR）走 WebSocket，仅放行 /_next/ 路径转发到 web。
+  server.on('upgrade', (request, socket, head) => {
+    if (!request.url?.startsWith('/_next/')) { socket.destroy(); return; }
+    const headers = { ...cleanHeaders(request.headers, request.socket.remoteAddress ?? 'unknown', origin),
+      connection: 'Upgrade', upgrade: 'websocket' };
+    const upstream = http.request({ hostname: 'web', port: 3000, path: request.url, method: 'GET', headers });
+    upstream.on('upgrade', (incoming, upstreamSocket, upstreamHead) => {
+      const lines = [`HTTP/1.1 ${incoming.statusCode} ${incoming.statusMessage}`];
+      for (let i = 0; i < incoming.rawHeaders.length; i += 2) lines.push(`${incoming.rawHeaders[i]}: ${incoming.rawHeaders[i + 1]}`);
+      socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+      if (upstreamHead?.length) socket.write(upstreamHead);
+      if (head?.length) upstreamSocket.write(head);
+      upstreamSocket.pipe(socket); socket.pipe(upstreamSocket);
+      upstreamSocket.on('error', () => socket.destroy()); socket.on('error', () => upstreamSocket.destroy());
+    });
+    upstream.on('response', () => socket.destroy());
+    upstream.on('error', () => socket.destroy());
+    upstream.end();
+  });
   server.headersTimeout = 15_000;
   server.requestTimeout = 300_000;
   server.keepAliveTimeout = 5_000;

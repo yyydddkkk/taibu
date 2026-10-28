@@ -22,6 +22,10 @@ export function useReadingPreferences(userId: string | null) {
                 setPreferences(current => pending.current?.userId === userId ? { ...result.settings!.chatPreferences, width: current.width } : result.settings!.chatPreferences);
                 setFontScale(result.settings.chatPreferences.fontScale);
             }
+        }).catch(error => {
+            // 卸载/切换账号时清理函数会中止请求，属于预期情况，不当作错误上抛。
+            if (controller.signal.aborted || (error as Error)?.name === 'AbortError') return;
+            throw error;
         });
         return () => controller.abort();
         // Theme setters don't represent an account change.
